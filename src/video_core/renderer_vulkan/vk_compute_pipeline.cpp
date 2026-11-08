@@ -364,6 +364,7 @@ ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk
                     LOG_ERROR(Render_Vulkan,
                               "Compute pipeline compilation failed shader={:#016x}: {}",
                               shader_hash, what);
+                    build_failed = true;
                     std::scoped_lock lock{build_mutex};
                     is_built = true;
                     build_condvar.notify_one();
