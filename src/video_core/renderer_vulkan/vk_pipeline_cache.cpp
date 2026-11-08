@@ -389,6 +389,8 @@ std::array<std::atomic<std::chrono::nanoseconds::rep>, 3> runtime_spirv_ns{};
 /// (by the first answer that did), since the last 10 s report.
 std::atomic<u32> precompiled_drawn{};
 std::atomic<u32> precompiled_failed{};
+std::atomic<u32> precompiled_created{};
+std::atomic<std::chrono::nanoseconds::rep> precompiled_gpu_ns{};
 std::mutex precompiled_reasons_mutex;
 std::map<std::string, u32> precompiled_reasons;
 
@@ -2501,9 +2503,24 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreatePrecompiledGraphicsPipeli
         precompiled_infos_file.close();
         return nullptr;
     }
+    // The pixel format traits the translation used: integer formats always (sampled textures),
+    // the others only with descriptors that use them.
+    u32 format_traits = FileEnvironment::FormatTraitInteger;
+    for (const auto* const info : info_ptrs) {
+        if (!info) {
+            continue;
+        }
+        if (std::ranges::any_of(info->image_descriptors,
+                                [](const auto& desc) { return desc.is_byte_addressed; })) {
+            format_traits |= FileEnvironment::FormatTraitByteAddressed;
+        }
+        if (!info->texture_buffer_descriptors.empty()) {
+            format_traits |= FileEnvironment::FormatTraitSnorm;
+        }
+    }
     for (size_t i = 0; i < live.size(); ++i) {
         const char* why = "";
-        if (!(*recorded)[i].AnswersHoldFor(*live[i], &why)) {
+        if (!(*recorded)[i].AnswersHoldFor(*live[i], &why, format_traits)) {
             CountPrecompiledReason(why);
             return nullptr;
         }
@@ -3528,8 +3545,12 @@ void ReportRuntimePipeline(const char* kind, std::chrono::steady_clock::time_poi
             precompiled_reasons.clear();
         }
         LOG_INFO(Render_Vulkan,
-                 "Precompiled pipelines in the last 10 s: {} translated on workers from their "
-                 "recorded environments, {} failed and replaced{}",
+                 "Precompiled pipelines in the last 10 s: {} created from kept infos ({:.1f} ms on "
+                 "the GPU thread), {} translated on workers from their recorded environments, {} "
+                 "failed and replaced{}",
+                 precompiled_created.exchange(0, std::memory_order::relaxed),
+                 ms(std::chrono::nanoseconds{
+                     precompiled_gpu_ns.exchange(0, std::memory_order::relaxed)}),
                  precompiled_drawn.exchange(0, std::memory_order::relaxed),
                  precompiled_failed.exchange(0, std::memory_order::relaxed), reasons);
         total = {};
@@ -3614,8 +3635,16 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         }
     }
 
+    const auto precompiled_begin = std::chrono::steady_clock::now();
     auto pipeline{CreatePrecompiledGraphicsPipeline(environments)};
-    if (!pipeline) {
+    if (pipeline) {
+        precompiled_created.fetch_add(1, std::memory_order_relaxed);
+        precompiled_gpu_ns.fetch_add(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
+                                                                 precompiled_begin)
+                .count(),
+            std::memory_order_relaxed);
+    } else {
         // Shader cache v2: two or more stages translate at once on the shader jobs' CPU workers
         // while this thread waits. Only this thread may flush guest memory, as reading a texture
         // descriptor does, so the descriptor pool is flushed here first; with this thread waiting

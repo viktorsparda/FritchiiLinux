@@ -1308,7 +1308,8 @@ u32 PixelFormatTraits(Shader::TexturePixelFormat format) {
 }
 } // Anonymous namespace
 
-bool FileEnvironment::AnswersHoldFor(Shader::Environment& live, const char** why) {
+bool FileEnvironment::AnswersHoldFor(Shader::Environment& live, const char** why,
+                                     u32 format_traits) {
     const auto fail = [why](const char* reason) {
         if (why) {
             *why = reason;
@@ -1348,8 +1349,9 @@ bool FileEnvironment::AnswersHoldFor(Shader::Environment& live, const char** why
                     return fail("texture type");
                 }
                 if (format != texture_pixel_formats.end() &&
-                    PixelFormatTraits(live.ReadTexturePixelFormat(live_value)) !=
-                        PixelFormatTraits(format->second)) {
+                    ((PixelFormatTraits(live.ReadTexturePixelFormat(live_value)) ^
+                      PixelFormatTraits(format->second)) &
+                     format_traits) != 0) {
                     return fail("texture pixel format");
                 }
             }
@@ -1371,7 +1373,8 @@ bool FileEnvironment::AnswersHoldFor(Shader::Environment& live, const char** why
     }
     for (const auto& [handle, format] : texture_pixel_formats) {
         if (!read_from_cbuf(handle) &&
-            PixelFormatTraits(live.ReadTexturePixelFormat(handle)) != PixelFormatTraits(format)) {
+            ((PixelFormatTraits(live.ReadTexturePixelFormat(handle)) ^ PixelFormatTraits(format)) &
+             format_traits) != 0) {
             return fail("texture pixel format");
         }
     }
