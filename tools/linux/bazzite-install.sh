@@ -13,7 +13,7 @@ repo=${FRITCHII_REPO:-viktorsparda/FritchiiLinux}
 app_dir="${XDG_DATA_HOME:-$HOME/.local/share}/fritchii"
 bin_dir="$HOME/.local/bin"
 apps_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-icons_dir="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/512x512/apps"
+icons_dir="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/256x256/apps"
 app_id=io.github.zortos293.lichii
 # Empty when the script is piped into bash; then the rules and icon come from elsewhere.
 src_dir=""
@@ -68,7 +68,10 @@ target="$app_dir/lichii.AppImage"
 if [ -z "$appimage" ]; then
     arch=$(uname -m)
     echo "Looking up the newest release of $repo"
-    releases=$(curl -fsSL "https://api.github.com/repos/$repo/releases?per_page=20")
+    if ! releases=$(curl -fsSL "https://api.github.com/repos/$repo/releases?per_page=20"); then
+        echo "Could not list the releases of $repo. Check your connection, or pass a downloaded AppImage." >&2
+        exit 1
+    fi
     url=$(python3 -c '
 import json, sys
 arch, variant = sys.argv[1], sys.argv[2]
@@ -112,8 +115,13 @@ if [ -n "$src_dir" ] && [ -f "$src_dir/dist/lichii.png" ]; then
     cp "$src_dir/dist/lichii.png" "$icons_dir/$app_id.png"
 else
     tmp=$(mktemp -d)
-    (cd "$tmp" && "$target" --appimage-extract "$app_id.png" > /dev/null 2>&1) || true
-    [ -f "$tmp/squashfs-root/$app_id.png" ] && cp -L "$tmp/squashfs-root/$app_id.png" "$icons_dir/"
+    # The top-level icon is a symlink into usr/share/icons, so take the real file from there.
+    (cd "$tmp" && "$target" --appimage-extract "usr/share/icons/*" > /dev/null 2>&1) || true
+    icon=$(find "$tmp/squashfs-root/usr/share/icons" -name "$app_id.png" -type f 2>/dev/null |
+        sort -V | tail -1)
+    if [ -n "$icon" ]; then
+        cp "$icon" "$icons_dir/$app_id.png"
+    fi
     rm -rf "$tmp"
 fi
 

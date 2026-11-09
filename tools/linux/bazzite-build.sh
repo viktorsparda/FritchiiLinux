@@ -91,7 +91,7 @@ if [ "$install_deps" = 1 ]; then
     # Anything missing from a given Fedora release is built from the bundled copy instead.
     $sudo dnf install -y --skip-unavailable \
         git cmake ninja-build clang lld llvm make autoconf automake libtool nasm patch \
-        pkgconf-pkg-config which file curl ccache desktop-file-utils \
+        pkgconf-pkg-config which file curl ccache desktop-file-utils patchelf \
         glslang spirv-tools spirv-headers-devel \
         qt6-qtbase-devel qt6-qtbase-private-devel qt6-qtcharts-devel qt6-qttools-devel \
         qt6-qtwayland-devel qt6-qtsvg-devel \
@@ -157,10 +157,27 @@ if [ "$appimage" = 1 ]; then
     (
         cd "$build_dir"
         export APPIMAGE_EXTRACT_AND_RUN=1
+        # linuxdeploy's bundled strip can't read Fedora's .relr.dyn sections; the libraries
+        # are already stripped.
+        export NO_STRIP=1
+        # The Qt plugin's own patchelf (0.15) corrupts libraries linked with packed relative
+        # relocations (DT_RELR), which Fedora uses; the bundled xcb libraries then crash on load.
+        if command -v patchelf > /dev/null; then
+            PATCHELF=$(command -v patchelf)
+            export PATCHELF
+        else
+            echo "patchelf is missing: install it, or the AppImage may crash on start" >&2
+        fi
         QMAKE=$(command -v qmake6 || command -v qmake-qt6 || echo /usr/lib64/qt6/bin/qmake)
         export QMAKE
         export EXTRA_QT_MODULES=waylandcompositor
-        export EXTRA_PLATFORM_PLUGINS='libqwayland-egl.so;libqwayland-generic.so'
+        # Qt 6.10 merged libqwayland-egl.so and libqwayland-generic.so into libqwayland.so.
+        plugins_dir=$("$QMAKE" -query QT_INSTALL_PLUGINS)/platforms
+        wayland=""
+        for plugin in libqwayland.so libqwayland-egl.so libqwayland-generic.so; do
+            [ -f "$plugins_dir/$plugin" ] && wayland="${wayland:+$wayland;}$plugin"
+        done
+        export EXTRA_PLATFORM_PLUGINS="$wayland"
         export LDAI_OUTPUT="$output"
         export OUTPUT="$output"
         export ARCH="$arch"

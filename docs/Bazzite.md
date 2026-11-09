@@ -97,6 +97,8 @@ The first build downloads them, along with any other dependency Fedora doesn't p
 `.cache/cpm`.
 
 A local build has the update checker turned off. Rebuild, or reinstall a release, to update it.
+An AppImage built this way needs the glibc of the Fedora release it was built on, so it is for
+your own machine; the release AppImages are built on Ubuntu 24.04 to run almost anywhere.
 
 ## Troubleshooting
 
