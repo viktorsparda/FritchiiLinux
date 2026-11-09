@@ -4053,6 +4053,16 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         if (PrecompiledAudit()) {
             AuditPrecompiled(environments.Span(), false, graphics_key.Hash());
         }
+        // As for a translated pipeline: the storage pointers the game's state answered as mapped
+        // (it answered every question the recorded environments were asked), kept if the
+        // pipeline is evicted and translated again.
+        VideoCommon::EvictedPointerSlots::Slots mapped_pointers;
+        for (size_t index = 0; index < Maxwell::MaxShaderProgram; ++index) {
+            if (graphics_key.unique_hashes[index] != 0) {
+                mapped_pointers[index] = environments.envs[index].MappedStoragePointerKeys();
+            }
+        }
+        pipeline->SetMappedPointers(std::move(mapped_pointers));
     } else {
         // Shader cache v2: two or more stages translate at once on the shader jobs' CPU workers
         // while this thread waits. Only this thread may flush guest memory, as reading a texture
