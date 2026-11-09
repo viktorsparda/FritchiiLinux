@@ -2341,6 +2341,12 @@ void PipelineCache::PreparePrecompiled(const std::filesystem::path& base_dir,
     LOG_INFO(Render_Vulkan, "Preparing {} precompiled pipelines from {}, from record {}{}", total,
              Common::FS::PathToUTF8String(path), start_index,
              build_inline ? ", built on the CPU workers" : "");
+    if (start_index != 0) {
+        LOG_WARNING(Render_Vulkan,
+                    "Continuing after a crash: the {} records before {} are drawn after translating "
+                    "them, without kept infos",
+                    start_index, start_index);
+    }
     callback(VideoCore::LoadCallbackStage::Build, start_index, total);
     for (size_t index = start_index; index < total; ++index) {
         if (stop_loading.stop_requested()) {
@@ -2461,18 +2467,20 @@ void PipelineCache::PreparePrecompiled(const std::filesystem::path& base_dir,
     LOG_INFO(Render_Vulkan, "Precompiled pipelines: {} prepared, {} failed, {} skipped, in {:.1f} s",
              state.built, state.failed, state.skipped, seconds);
     if (stop_loading.stop_requested()) {
-        // Closing the game is not a crash: the next boot continues from here without counting a
-        // restart at this spot.
-        std::scoped_lock lock{state.mutex};
-        write_progress(state.low_water, 0);
         kept.file.close();
         std::filesystem::remove(kept_temporary, error);
+        // The next boot prepares from the first record again, so the infos it keeps are
+        // complete; only a crash (which leaves the checkpoint) continues from the checkpoint.
+        std::filesystem::remove(progress_path, error);
         return;
     }
     {
         std::vector<size_t> kept_records;
         for (size_t index = 0; index < total; ++index) {
-            if (std::ranges::any_of(kept.record_infos[index], [](u32 id) { return id != NoInfo; })) {
+            // An entry holds 5 environments: a record with both vertex programs (6) is drawn
+            // after translating it, as without the file.
+            if (records[index].envs.size() <= 5 &&
+                std::ranges::any_of(kept.record_infos[index], [](u32 id) { return id != NoInfo; })) {
                 kept_records.push_back(index);
             }
         }
