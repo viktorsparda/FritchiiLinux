@@ -2012,6 +2012,11 @@ bool DriverCachesPipelines(const Device& device) {
 void PipelineCache::PreparePrecompiled(const std::filesystem::path& base_dir,
                                        std::stop_token stop_loading,
                                        const VideoCore::DiskResourceLoadCallback& callback) {
+    // A load before this one may hold the kept infos open, which the step rewrites and renames.
+    precompiled_file.close();
+    precompiled_infos_file.close();
+    precompiled_records.clear();
+    precompiled_compute_records.clear();
     const char* enabled = std::getenv("EDEN_NX2_PRECOMPILED");
     if (enabled && enabled[0] == '0') {
         return;
@@ -2523,6 +2528,9 @@ void PipelineCache::PreparePrecompiled(const std::filesystem::path& base_dir,
 bool PipelineCache::LoadPrecompiledInfos(const std::filesystem::path& precompiled,
                                          const std::filesystem::path& infos,
                                          const std::string& stamp) {
+    // Streams of an earlier load would be read at this file's offsets.
+    precompiled_file.close();
+    precompiled_infos_file.close();
     precompiled_records.clear();
     precompiled_compute_records.clear();
     try {

@@ -1325,6 +1325,10 @@ bool FileEnvironment::AnswersHoldFor(Shader::Environment& live, const char** why
         live.ReadViewportTransformState() != viewport_transform_state) {
         return fail("viewport transform");
     }
+    // A passthrough geometry program passes the attributes this mask does not skip.
+    if (stage == Shader::Stage::Geometry && live.GpPassthroughMask() != gp_passthrough_mask) {
+        return fail("geometry passthrough mask");
+    }
     // HLE replacements are asked for every constant buffer read when there are any.
     if (live.HasHLEMacroState() || HasHLEMacroState()) {
         return fail("HLE constant replacements");

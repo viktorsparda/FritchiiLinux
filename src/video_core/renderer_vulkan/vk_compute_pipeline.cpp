@@ -317,6 +317,8 @@ ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk
             LOG_CRITICAL(Render_Vulkan, "Driver rejected compute shader {:016X}: {}", shader_hash,
                          exception.what());
             ReportPipelineBuildFailure(exception.GetResult());
+            // A precompiled pipeline is then replaced by one translated from the game's state.
+            build_failed = true;
             std::scoped_lock lock{build_mutex};
             is_built = true;
             build_condvar.notify_one();
