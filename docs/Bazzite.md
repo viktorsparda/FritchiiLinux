@@ -1,0 +1,117 @@
+# Lichii on Bazzite
+
+This fork packages Lichii for [Bazzite](https://bazzite.gg) and other Fedora Atomic systems. Lichii's
+Linux code is upstream's ([zortos293/Lichii](https://github.com/zortos293/Lichii)). What this fork adds:
+
+- `tools/linux/bazzite-install.sh` installs an AppImage for your user, with a launcher, a menu
+  entry, and optionally the controller rules and a Steam shortcut. Nothing is layered onto the
+  system image.
+- `tools/linux/bazzite-build.sh` builds from source inside a Fedora distrobox that matches your
+  Bazzite release, and can package the result as an AppImage.
+- The `bazzite-linux` workflow publishes Linux AppImages as releases of this repository. Their
+  in-app updater follows this repository's releases.
+
+Lichii is experimental. Only use games, keys and firmware you dumped from your own console. None
+of them are included.
+
+## Install
+
+In a terminal (Konsole, or Ptyxis on GNOME):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/viktorsparda/FritchiiLinux/nx2/tools/linux/bazzite-install.sh | bash
+```
+
+This downloads the newest PGO AppImage from this repository's releases to
+`~/.local/share/fritchii/lichii.AppImage`, adds `~/.local/bin/lichii`, and adds Lichii to the app
+menu. Options (with `bash -s --` when piping, e.g. `| bash -s -- --steam`):
+
+| Option | Effect |
+| --- | --- |
+| `--standard` | Standard build instead of PGO. Try it if the PGO build misbehaves on your machine. |
+| `--steam` | Adds Lichii to Steam as a non-Steam game, for Gaming Mode. |
+| `--udev` | Installs `72-eden-input.rules` to `/etc/udev/rules.d` (asks for sudo). Bazzite already ships rules for most controllers; use this only if motion controls or a controller isn't detected. |
+| `--uninstall` | Removes the AppImage, launcher and menu entry. Saves and settings stay. |
+| `path/to/file.AppImage` | Installs that AppImage instead of downloading one. |
+
+You can also just download `lichii-linux-x86_64-pgo.AppImage` from the releases page, mark it
+executable (`chmod +x`, or Properties > Permissions in the file manager) and run it, or add it with
+Gear Lever from Bazaar.
+
+If libfuse2 is missing, the launcher sets `APPIMAGE_EXTRACT_AND_RUN=1`. The AppImage then unpacks
+itself on each start, which is slower but needs no FUSE.
+
+## Setup
+
+1. Start Lichii and point it at your `prod.keys` and firmware when it asks (or use
+   **Tools > Install Decryption Keys** and **Tools > Install Firmware**).
+2. Double-click the empty game list (or its **Add New Game Directory** entry) to add your games folder.
+3. Configure controllers in **Emulation > Configure... > Controls**.
+
+Data uses upstream's directory names:
+
+| What | Where |
+| --- | --- |
+| Saves, keys, NAND, mods | `~/.local/share/eden` |
+| Settings | `~/.config/eden` |
+| Shader caches | `~/.cache/eden` |
+| Logs | `~/.local/share/eden/log/eden_log.txt` |
+
+## Gaming Mode (Steam Deck, handhelds, HTPC)
+
+1. In Desktop Mode, run the installer with `--steam`, or in Steam use **Games > Add a Non-Steam
+   Game to My Library** and pick Lichii.
+2. Set up keys, firmware and games in Desktop Mode first. The Qt settings windows are awkward to
+   use with a controller.
+3. To start a game straight from Steam, set the shortcut's target to `~/.local/bin/lichii` and its
+   launch options to `-f -g "/path/to/game.nsp"`. `-f` starts fullscreen.
+4. Pick a gamepad controller layout in Steam Input, so the Steam Deck's controls reach Lichii as a
+   controller.
+
+If the window is black or misplaced under Gaming Mode's compositor, enable
+**Force X11 as Graphics Backend** in **Emulation > Configure... > General**, or put
+`QT_QPA_PLATFORM=xcb %command%` in the shortcut's launch options.
+
+## Updates
+
+Release builds check this repository for new releases and can replace the installed AppImage in
+place, keeping one rollback copy. Running the installer again also updates it.
+
+## Build from source
+
+```bash
+git clone https://github.com/viktorsparda/FritchiiLinux.git
+cd FritchiiLinux
+tools/linux/bazzite-build.sh --appimage
+tools/linux/bazzite-install.sh build/bazzite/lichii-linux-x86_64.AppImage
+```
+
+On the Bazzite host, the script creates a `fritchii-build` distrobox from
+`registry.fedoraproject.org/fedora-toolbox:<your Fedora release>`, installs the build dependencies
+with dnf inside it, and builds with clang. On a normal Fedora system, or inside a box you made
+yourself, it builds in place. `--help` lists the options.
+
+Two dependencies always come from the bundled copies: Fedora's `xbyak-devel` is older than
+dynarmic needs, and Fedora's FFmpeg (`ffmpeg-free`) can't decode the H.264/HEVC movies games use.
+The first build downloads them, along with any other dependency Fedora doesn't package, into
+`.cache/cpm`.
+
+A local build has the update checker turned off. Rebuild, or reinstall a release, to update it.
+
+## Troubleshooting
+
+- **Game loads (music plays) but the screen stays black, and the log has
+  `Native MME (split front) failed ... instruction outside uploaded RAM`.** Set
+  **DMA Accuracy** in **Configure... > Graphics > Advanced** to **Safe** for that game
+  ([zortos293/Lichii#532](https://github.com/zortos293/Lichii/issues/532)).
+- **`Failed to open VDPAU backend libvdpau_nvidia.so` / `Failed to initialise VAAPI`.** These
+  are informational on most systems and not the cause of a black screen
+  ([zortos293/Lichii#605](https://github.com/zortos293/Lichii/issues/605)).
+- **The tar.gz fails with ``version `Qt_6.8' not found``.** The tar.gz uses your system's Qt;
+  use the AppImage instead, which bundles Qt
+  ([zortos293/Lichii#901](https://github.com/zortos293/Lichii/issues/901)).
+- **GPU hangs or device loss on AMD.** These are upstream renderer issues, not packaging ones.
+  Check upstream's open issues for your game and GPU.
+
+When you report a problem, include `eden_log.txt`, your Bazzite image (`rpm-ostree status`), GPU,
+and whether you were in Desktop or Gaming Mode.
