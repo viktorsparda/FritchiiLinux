@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <condition_variable>
+#include <cstdlib>
 #include <optional>
 #include <span>
 #include <vector>
@@ -123,6 +124,9 @@ struct CommandList final {
     /// executed instead of the memory, which the game may already be refilling for a later frame.
     std::vector<CommandHeader> submitted_words;
     std::vector<u32> submitted_offsets;
+    /// Entries (ascending) not copied when submitted, because a GPU map still queued covers them:
+    /// DmaPusher::Push copies them after the map, and until then they read memory.
+    std::vector<u32> deferred_entries;
     /// DmaPusher::suspensions when the words were copied. A list copied during a suspension, or
     /// that waited behind one, reads memory instead: games write the commands it runs before they
     /// release the acquire.
@@ -155,22 +159,25 @@ public:
     void Push(CommandList&& entries) {
         // Copied during a suspension, or behind one: copy again now, unless still suspended.
         const u64 now = suspensions.load(std::memory_order_acquire);
-        if (ResnapshotEnabled() && !entries.submitted_offsets.empty() && (now & 1) == 0 &&
-            entries.snapshot_suspensions != now) {
-            RefreshSnapshot(entries, now);
+        if (!entries.submitted_offsets.empty() && (now & 1) == 0) {
+            if (ResnapshotEnabled() && entries.snapshot_suspensions != now) {
+                RefreshSnapshot(entries, now);
+            } else if (!entries.deferred_entries.empty()) {
+                // Behind a GPU map when submitted: the map has run by now (GPU::MapInOrder).
+                RefreshDeferredEntries(entries);
+            }
         }
         dma_pushbuffer.push_back(std::move(entries));
     }
 
     void DispatchCalls();
 
-    /// Switch 2: true while the channel is suspended on a semaphore acquire.
+    /// Switch 2: true while the channel is suspended, on a semaphore acquire or on the GPU's copy
+    /// of a command list it reads next.
     [[nodiscard]] bool HasPendingAcquire() const {
-        return puller.HasPendingAcquire();
+        return puller.HasPendingAcquire() || pending_list_tick.has_value();
     }
-    [[nodiscard]] bool CanResumeAcquire() {
-        return puller.CanResumeAcquire(*this);
-    }
+    [[nodiscard]] bool CanResumeAcquire();
 
     void BindSubchannel(Engines::EngineInterface* engine, u32 subchannel_id, Engines::EngineTypes engine_type) {
         subchannels[subchannel_id] = engine;
@@ -180,6 +187,11 @@ public:
     void BindRasterizer(VideoCore::RasterizerInterface* rasterizer);
 
 private:
+    friend struct DmaPusherTestAccess;
+
+    static bool IsMemoryWriter(const Engines::EngineInterface& engine, Engines::EngineTypes type,
+                               u32 method);
+
     static constexpr u32 non_puller_methods = 0x40;
     static constexpr u32 max_subchannels = 8;
     bool Step();
@@ -206,6 +218,8 @@ public:
     bool IsGpuWrittenCommands(GPUVAddr address, size_t size);
     /// Copies the list's words from memory again, as of suspension count `now`.
     void RefreshSnapshot(CommandList& list, u64 now);
+    /// Copies the list's deferred entries (CommandList::deferred_entries) from memory.
+    void RefreshDeferredEntries(CommandList& list);
 
     /// EDEN_NX2_RESNAPSHOT=0 turns snapshot refreshes off.
     static bool ResnapshotEnabled() {
@@ -218,8 +232,9 @@ public:
     /// Reads a command list on pages the GPU wrote into command_headers, from the copies the
     /// buffer cache made after the work that wrote them or from guest memory for pages flushed
     /// since. False when not all are current (or the list isn't GPU-written): the caller drains,
-    /// flushes and reads guest memory.
-    bool ReadGpuWrittenCommands(GPUVAddr address, u32 count);
+    /// flushes and reads guest memory. With `pending`, a copy the GPU has not finished sets
+    /// `*pending` and pending_list_tick instead of waiting (the result is false then).
+    bool ReadGpuWrittenCommands(GPUVAddr address, u32 count, bool* pending = nullptr);
     /// Brings command list words the GPU wrote (still only in host buffers) to guest memory.
     bool FlushGpuWrittenCommands(GPUVAddr address, size_t size);
 
@@ -261,6 +276,17 @@ public:
     void ResolveSplitMethod(GPUVAddr entry_address);
     static constexpr size_t MaxParkedMethods = 16;
 
+    // Read per channel, not at static initialization, which runs before the frontend loads
+    // nx2_switches.txt.
+    // EDEN_NX2_SEM_WATCH=<gpu address>: log every method whose argument is the low word of an
+    // address in the 16 bytes there (finds the engine and method that release a semaphore).
+    const u32 semaphore_watch = [] {
+        const char* value = std::getenv("EDEN_NX2_SEM_WATCH");
+        return value ? static_cast<u32>(std::strtoull(value, nullptr, 16)) : 0U;
+    }();
+    // EDEN_NX2_PB_CHECK also keeps the last parsed entries, for DumpCurrentEntry.
+    const bool record_parsed_entries = std::getenv("EDEN_NX2_PB_CHECK") != nullptr;
+
     // Debug aid: hashes of the words of the last entries as they were parsed.
     struct ParsedEntry {
         GPUVAddr address;
@@ -280,11 +306,17 @@ public:
     std::condition_variable sync_cv;
 
     VideoCore::RasterizerInterface* rasterizer = nullptr;
+    /// Host GPU tick of the command list copy this channel waits for (ReadGpuWrittenCommands).
+    std::optional<u64> pending_list_tick;
+    /// The entry parsed next was suspended on pending_list_tick, which is done now.
+    bool resumed_list_read{};
 
-    const bool ib_enable : 1 = true; ///< IB mode enabled
-    bool dma_increment_once : 1 = false;
-    bool signal_sync : 1 = false;
-    bool synced : 1 = false;
+    // Not bitfields: the fence thread sets synced, and a bitfield write would rewrite the byte it
+    // shares with dma_increment_once and signal_sync (#479).
+    const bool ib_enable = true; ///< IB mode enabled
+    bool dma_increment_once = false;
+    bool signal_sync = false;
+    std::atomic<bool> synced{false};
 };
 
 } // namespace Tegra

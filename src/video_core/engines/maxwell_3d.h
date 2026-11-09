@@ -26,6 +26,8 @@
 #include "video_core/engines/engine_upload.h"
 #include "video_core/gpu.h"
 #include "video_core/macro.h"
+#include "video_core/nx2_fast_draw.h"
+#include "video_core/nx2_perf.h"
 #include "video_core/textures/texture.h"
 #include "video_core/engines/maxwell_3d.h"
 
@@ -3202,6 +3204,11 @@ public:
     /// Write multiple values to the register identified by method.
     void CallMultiMethod(Core::System& system, u32 method, const u32* base_start, u32 amount, u32 methods_pending) override;
 
+    /// GpuSplit's back (fast_maxwell3d): CallMethod for each of up to 64 single writes to the
+    /// constant buffer data registers, uploaded in one memory write within a device page.
+    void CallConstBufferWords(Core::System& system, const u32* methods, const u32* arguments,
+                              u32 count);
+
     /// GPU thread split with macros on its front half (gpu_split.h, EDEN_NX2_SPLIT=2), called by
     /// the front instead of CallMethod: runs macros and macro uploads against a copy of the
     /// registers and sends the register writes to the back thread.
@@ -3265,6 +3272,16 @@ public:
     /// Handles a write to the CB_BIND register.
     void ProcessCBBind(size_t stage_index);
 
+    /// Fast draw (nx2_fast_draw.h): registers that only parameterize the next draw, the next
+    /// constant buffer bind or the buffers a delta draw binds again, or that ProcessMethodCall
+    /// handles, so writing them doesn't end draw reuse.
+    static bool IsFastDrawParameter(u32 method);
+    /// Methods fast draw records as light changes (constant buffer data and binds).
+    static bool IsFastDrawDeltaMethod(u32 method);
+    /// A vertex stream's address, size or limit (not its stride or enable).
+    static bool IsFastDrawVertexBuffer(u32 method);
+    void NoteFastDrawConstantData(GPUVAddr begin, GPUVAddr end);
+
     /// Handles a write to the CB_DATA[i] register.
     void ProcessCBData(u32 value);
     void ProcessCBMultiData(const u32* start_base, u32 amount);
@@ -3284,6 +3301,12 @@ private:
 
     void ProcessMethodCall(u32 method, u32 argument, u32 nonshadow_argument, bool is_last_call);
 
+    /// CallMethod with every check, for the cases and tools CallMethodFast leaves out.
+    void CallMethodSlow(Core::System& system, u32 method, u32 method_argument, bool is_last_call);
+    void CallMethodFast(u32 method, u32 method_argument, bool is_last_call);
+    /// EDEN_NX2_PERF_VERIFY: CallMethodFast's register state against CallMethodSlow's.
+    void VerifyCallMethod(Core::System& system, u32 method, u32 method_argument, bool is_last_call);
+
     /// Retrieves information about a specific TIC entry from the TIC buffer.
     Texture::TICEntry GetTICEntry(u32 tic_index) const;
 
@@ -3299,12 +3322,8 @@ private:
     void CallMacroMethod(Core::System& system, u32 method, std::span<const u32> parameters);
 
     /// Whether state register writes that keep the register's value are dropped (CallMethod).
-    static bool SkipSameValueWrites() {
-        static const bool skip = [] {
-            const char* value = std::getenv("EDEN_NX2_SKIP_SAME");
-            return value == nullptr || value[0] != '0';
-        }();
-        return skip;
+    bool SkipSameValueWrites() const {
+        return skip_same_value_writes;
     }
 
     /// Handles writes to the macro uploading register.
@@ -3337,6 +3356,10 @@ private:
 
     MemoryManager& memory_manager;
 
+    /// Device memory of the texture and sampler header tables (NoteFastDrawConstantData).
+    VideoCommon::Nx2FastDraw::DeviceSpans fast_draw_header_spans;
+    VideoCommon::Nx2FastDraw::DeviceSpans fast_draw_sampler_spans;
+
     VideoCore::RasterizerInterface* rasterizer = nullptr;
 
     /// Start offsets of each macro in macro_memory
@@ -3367,6 +3390,17 @@ private:
         recent_writes[recent_write_index++ % recent_writes.size()] = {method, argument, amount, pending};
     }
     void DumpRecentWrites(u32 method);
+    // EDEN_NX2_3D_METHODS: log the first write to each 3D register (finds methods Eden doesn't
+    // model). Read per engine, not at static initialization, which runs before the frontend
+    // loads nx2_switches.txt.
+    const bool trace_first_method_writes = std::getenv("EDEN_NX2_3D_METHODS") != nullptr;
+    // EDEN_NX2_SKIP_SAME and EDEN_NX2_PERF_VERIFY, read per engine like the switch above. Every
+    // method checks them, so they are members rather than statics with a guard on the hot path.
+    const bool skip_same_value_writes = [] {
+        const char* value = std::getenv("EDEN_NX2_SKIP_SAME");
+        return value == nullptr || value[0] != '0';
+    }();
+    const bool perf_verify = VideoCommon::Nx2Perf::Verify();
     /// Parameters that have been submitted to the macro call so far.
     std::vector<u32> macro_params;
 
@@ -3386,10 +3420,14 @@ private:
     // the front owns the macro code and bindings (the back thread then leaves them alone).
     struct FrontState;
     FrontState& Front(Core::System& system, VideoCommon::GpuSplit& split);
+    void ReleaseFront();
     void FrontWrite(VideoCommon::GpuSplit& split, FrontState& state, u32 method, u32 argument,
                     bool is_last_call, bool from_macro);
     void FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split, FrontState& state);
-    void FrontDmaRead(VideoCommon::GpuSplit& split, FrontState& state, u32 method, u32 count);
+    void FrontTrackInstanceLoop(FrontState& state, u32 method, u32 value);
+    bool FrontSkipsLoopWrite(FrontState& state, u32 method, u32 value, bool shadow_kept);
+    void FrontDmaRead(VideoCommon::GpuSplit& split, FrontState& state, u32 macro, u32 method,
+                      u32 count);
     void FrontVerify(VideoCommon::GpuSplit& split, FrontState& state);
     void FinishFrontMacro(Core::System& system);
     std::unique_ptr<FrontState> front;

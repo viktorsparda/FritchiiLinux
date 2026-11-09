@@ -20,6 +20,10 @@
 #include "video_core/texture_cache/types.h"
 #include "video_core/textures/texture.h"
 
+namespace Tegra::Texture {
+class UnswizzleWorker;
+}
+
 namespace VideoCommon {
 
 using Tegra::Texture::TICEntry;
@@ -101,7 +105,8 @@ void ExecuteUnswizzlePlan(Tegra::MemoryManager& gpu_memory, const UnswizzlePlan&
 
 [[nodiscard]] boost::container::small_vector<BufferImageCopy, 16> UnswizzleImage(
     Tegra::MemoryManager& gpu_memory, GPUVAddr gpu_addr, const ImageInfo& info,
-    std::span<const u8> input, std::span<u8> output);
+    std::span<const u8> input, std::span<u8> output,
+    Tegra::Texture::UnswizzleWorker* worker = nullptr);
 
 /// For a single-layer 2D block-linear image of 1x1-texel blocks: the host sparse blocks
 /// (tile_width x tile_height texels) that the guest byte ranges (offset, size) touch, merged into
@@ -134,6 +139,12 @@ void ConvertImage(std::span<const u8> input, const ImageInfo& info, std::span<u8
 [[nodiscard]] Extent3D MipSize(Extent3D size, u32 level);
 
 [[nodiscard]] Extent3D MipBlockSize(const ImageInfo& info, u32 level);
+
+/// Whether `copies` from `src` write every texel of `dst` unscaled: same 2D format, every level
+/// and layer from the origin. False when either image is rescaled or lacks part of its host
+/// memory (sparse, unbacked, trimmed levels).
+[[nodiscard]] bool CopiesWriteWholeImage(const ImageBase& dst, const ImageBase& src,
+                                         std::span<const ImageCopy> copies);
 
 [[nodiscard]] boost::container::small_vector<SwizzleParameters, 16> FullUploadSwizzles(
     const ImageInfo& info);

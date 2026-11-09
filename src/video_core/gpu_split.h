@@ -67,6 +67,10 @@ public:
     [[nodiscard]] bool Active() const {
         return active;
     }
+    /// How often the split started: state the front copied during an earlier start is stale.
+    [[nodiscard]] u32 Starts() const {
+        return starts;
+    }
     /// Whether the front runs the engines' macros (EDEN_NX2_SPLIT=2).
     [[nodiscard]] bool FrontMacros() const {
         return front_macros;
@@ -123,13 +127,17 @@ public:
         Commit(1);
     }
 
+    /// Defer flag: the call doesn't end fast draw reuse (nx2_fast_draw.h).
+    static constexpr u64 FastDrawNeutral = 1 << 7;
+
     /// Runs `func` on the back after everything sent before it. Must be trivially copyable.
+    /// `flags`: FastDrawNeutral when `func` can't change what a draw resolves to.
     template <typename Func>
-    void Defer(const Func& func) {
+    void Defer(const Func& func, u64 flags = 0) {
         static_assert(std::is_trivially_copyable_v<Func> && alignof(Func) <= alignof(u64));
         constexpr size_t payload = (sizeof(Func) + sizeof(u64) - 1) / sizeof(u64);
         u64* const entry = Reserve(2 + payload);
-        entry[0] = static_cast<u64>(Kind::Call) | (u64{payload} << 8);
+        entry[0] = static_cast<u64>(Kind::Call) | flags | (u64{payload} << 8);
         entry[1] = reinterpret_cast<u64>(&CallThunk<Func>);
         std::memcpy(entry + 2, &func, sizeof(Func));
         Commit(2 + payload);
@@ -176,6 +184,8 @@ public:
     bool WaitForSync();
 
 private:
+    friend struct GpuSplitTestAccess;
+
     enum class Kind : u64 {
         Wrap,   ///< The rest of the ring is unused: continue at its start
         Engine, ///< The engine the next methods go to: word 1
@@ -222,11 +232,23 @@ private:
     void SwitchEngine(Tegra::Engines::EngineInterface* engine);
     bool WaitFor(u64 target, DrainSite site);
 
+    /// One step of a front wait for the back to consume `target`.
+    void Backoff(u32 spins, u64 target);
+    /// After the back stored `consumed`: wakes a front sleeping in Backoff.
+    void NotifyFront() {
+        if (front_waiting.load(std::memory_order_seq_cst)) {
+            front_wake.fetch_add(1, std::memory_order_seq_cst);
+            front_wake.notify_one();
+        }
+    }
+
     void BackLoop(std::stop_token stop_token);
-    size_t Execute(const u64* entry);
+    /// Runs the entry at `entry` (of the `words` published before the ring's end), returns its size.
+    size_t Execute(const u64* entry, size_t words);
 
     Core::System* system{};
     bool active{};
+    u32 starts{};
     bool front_macros{};
     std::unique_ptr<u64[]> ring;
 
@@ -258,6 +280,9 @@ private:
     alignas(128) std::atomic<u64> wait_target{~u64{0}};
     alignas(128) std::atomic<bool> back_waiting{};
     std::atomic<u32> wake{};
+    /// The front sleeps in Backoff (#161: instead of yielding).
+    alignas(128) std::atomic<bool> front_waiting{};
+    std::atomic<u32> front_wake{};
     std::jthread back_thread;
 };
 

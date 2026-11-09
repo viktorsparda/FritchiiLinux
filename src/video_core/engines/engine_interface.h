@@ -44,9 +44,15 @@ public:
     }
 
     std::bitset<(std::numeric_limits<u16>::max)()> execution_mask{};
+    /// A Maxwell3D whose CallMethod takes its fast path (Nx2Perf): GpuSplit's back calls it
+    /// without the virtual call.
+    bool fast_maxwell3d{};
     std::vector<std::pair<u32, u32>> method_sink{};
     GPUVAddr current_dma_segment;
     bool current_dirty{};
+    /// Fast draw (nx2_fast_draw.h): the engine reports its own changes (Maxwell3D); a method of any other
+    /// engine ends draw reuse.
+    bool reports_fast_draw_breaks{};
 protected:
     virtual void ConsumeSinkImpl(Core::System& system) {
         for (auto [method, value] : method_sink) {
