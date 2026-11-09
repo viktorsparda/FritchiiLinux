@@ -443,16 +443,27 @@ std::vector<u32> ReadKeptSpirv(std::ifstream& file, std::pair<u64, u32> blob) {
 }
 
 /// A shader stage from the SPIR-V the preparation step kept (precompiled_infos), on a worker.
+/// Counts the loads of the kept infos: a pipeline made from one load reads its SPIR-V from that
+/// load's file only, and each worker reopens its stream for a new load (the file is rewritten
+/// under the same name when the step prepares again).
+std::atomic<u64> kept_infos_generation{1};
+
 vk::ShaderModule BuildKeptSpirv(const Device& device, const std::filesystem::path& path,
-                                std::pair<u64, u32> blob, u64 pipeline_hash) {
+                                u64 generation, std::pair<u64, u32> blob, u64 pipeline_hash) {
     thread_local std::ifstream file;
     thread_local std::filesystem::path file_path;
+    thread_local u64 file_generation{};
     thread_local std::vector<u8> compressed;
-    if (!file.is_open() || file_path != path) {
+    if (generation != kept_infos_generation.load(std::memory_order_acquire)) {
+        throw Shader::LogicError("Precompiled pipeline {:016x}: its kept SPIR-V was replaced",
+                                 pipeline_hash);
+    }
+    if (!file.is_open() || file_path != path || file_generation != generation) {
         file.close();
         file.clear();
         file.open(path, std::ios::binary);
         file_path = path;
+        file_generation = generation;
     }
     const auto [offset, size] = blob;
     compressed.resize(size);
@@ -2015,6 +2026,7 @@ void PipelineCache::PreparePrecompiled(const std::filesystem::path& base_dir,
     // A load before this one may hold the kept infos open, which the step rewrites and renames.
     precompiled_file.close();
     precompiled_infos_file.close();
+    kept_infos_generation.fetch_add(1, std::memory_order_acq_rel);
     precompiled_records.clear();
     precompiled_compute_records.clear();
     const char* enabled = std::getenv("EDEN_NX2_PRECOMPILED");
@@ -2408,6 +2420,9 @@ void PipelineCache::PreparePrecompiled(const std::filesystem::path& base_dir,
                              build = [index, &keep_infos, spirv = std::move(spirv),
                                       pipeline = std::move(entry.pipeline)] {
                                  pipeline->Build();
+                                 if (pipeline->BuildFailed()) {
+                                     return false;
+                                 }
                                  keep_infos(index, &pipeline->StageInfo(), nullptr, spirv);
                                  return true;
                              };
@@ -2531,6 +2546,7 @@ bool PipelineCache::LoadPrecompiledInfos(const std::filesystem::path& precompile
     // Streams of an earlier load would be read at this file's offsets.
     precompiled_file.close();
     precompiled_infos_file.close();
+    kept_infos_generation.fetch_add(1, std::memory_order_acq_rel);
     precompiled_records.clear();
     precompiled_compute_records.clear();
     try {
@@ -2708,12 +2724,14 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreatePrecompiledGraphicsPipeli
         spirv_blobs[stage] = precompiled_info_blobs[record.spirv[stage]];
     }
     if (kept_spirv) {
-        auto build_kept = [this, key = graphics_key, path = precompiled_infos_path, spirv_blobs,
-                           present] {
+        auto build_kept = [this, key = graphics_key, path = precompiled_infos_path,
+                           generation = kept_infos_generation.load(std::memory_order_acquire),
+                           spirv_blobs, present] {
             std::array<vk::ShaderModule, Maxwell::MaxShaderStage> modules;
             for (size_t stage = 0; stage < modules.size(); ++stage) {
                 if (present[stage]) {
-                    modules[stage] = BuildKeptSpirv(device, path, spirv_blobs[stage], key.Hash());
+                    modules[stage] = BuildKeptSpirv(device, path, generation, spirv_blobs[stage],
+                                                    key.Hash());
                 }
             }
             precompiled_from_spirv.fetch_add(1, std::memory_order_relaxed);
@@ -2847,8 +2865,9 @@ ComputePipelineCacheEntry PipelineCache::CreatePrecompiledComputePipeline(
             continue;
         }
         auto emit_module = [this, path = precompiled_infos_path,
+                            generation = kept_infos_generation.load(std::memory_order_acquire),
                             blob = precompiled_info_blobs[record.spirv[0]], hash] {
-            auto module = BuildKeptSpirv(device, path, blob, hash);
+            auto module = BuildKeptSpirv(device, path, generation, blob, hash);
             precompiled_from_spirv.fetch_add(1, std::memory_order_relaxed);
             return module;
         };

@@ -1325,6 +1325,10 @@ bool FileEnvironment::AnswersHoldFor(Shader::Environment& live, const char** why
         live.ReadViewportTransformState() != viewport_transform_state) {
         return fail("viewport transform");
     }
+    // Handles of non-bindless textures are read from this constant buffer.
+    if (live.TextureBoundBuffer() != texture_bound) {
+        return fail("texture bound buffer");
+    }
     // A passthrough geometry program passes the attributes this mask does not skip.
     if (stage == Shader::Stage::Geometry && live.GpPassthroughMask() != gp_passthrough_mask) {
         return fail("geometry passthrough mask");
