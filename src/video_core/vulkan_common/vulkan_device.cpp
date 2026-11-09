@@ -649,6 +649,7 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
     }
 
     sets_per_pool = 64;
+    bool fsr_float16 = false;
     // AMD GCN4 and older are told apart by their lack of float16, read before float16 is turned
     // off for newer AMD drivers below: checked after that, every AMD GPU looked like GCN4 and lost
     // VK_EXT_sampler_filter_minmax (an RDNA3 Radeon 780M logged it).
@@ -669,6 +670,9 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
             LOG_WARNING(Render_Vulkan,
                         "AMD drivers (2026+) have broken float16 math");
             features.shader_float16_int8.shaderFloat16 = false;
+            // AMD FSR runs its own shaders and needs the device feature; the emulator's shaders
+            // still don't do float16 math (float16_math below stays false).
+            fsr_float16 = Settings::values.ocarina_fsr.GetValue();
         }
     }
 
@@ -798,8 +802,17 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
     // The Ampere workaround above only concerns guest shaders: enable float16 on the device so
     // host-only shaders (frame generation) may use it. The AMD and Intel workarounds turn it off
     // for every shader, host ones included.
+    // VK_EXT_shader_float8: FSR 4 runs an FP8 network on RDNA 4 through cooperative matrices; its
+    // output was black without the feature on the device (port of CheezerWheezer/Lichii ab795780).
+    // Lichii's own shaders don't use it.
+    if (extensions.shader_float8) {
+        LOG_INFO(Render_Vulkan, "VK_EXT_shader_float8 enabled (float8 {}, float8 matrices {}) for FSR 4",
+                 features.shader_float8.shaderFloat8 != VK_FALSE,
+                 features.shader_float8.shaderFloat8CooperativeMatrix != VK_FALSE);
+    }
+
     host_float16_supported |= float16_math;
-    if (host_float16_supported) {
+    if (host_float16_supported || fsr_float16) {
         features.shader_float16_int8.shaderFloat16 = VK_TRUE;
     }
     logical = vk::Device::Create(physical, queue_cis, ExtensionListForVulkan(loaded_extensions), first_next, dld);

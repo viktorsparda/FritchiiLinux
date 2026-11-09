@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #include <boost/container/static_vector.hpp>
 
@@ -143,17 +144,32 @@ struct Fsr4Upscaler::Api {
 std::shared_ptr<Common::DynamicLibrary> Fsr4Upscaler::OpenLibrary() {
     static const std::shared_ptr<Common::DynamicLibrary> library =
         []() -> std::shared_ptr<Common::DynamicLibrary> {
-        // EDEN_NX2_FSR4_LIB, else the library's own name in the user folder.
+        // EDEN_NX2_FSR4_LIB, else the library's own name in the user folder, else one shipped
+        // with the emulator (beside it, or in ../lib as an AppImage bundles it).
         std::string path;
         if (const char* const env = std::getenv("EDEN_NX2_FSR4_LIB"); env && env[0] != '\0') {
             path = env;
         } else {
-            const auto file = Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir) / LIBRARY_NAME;
+            std::vector<std::filesystem::path> candidates{
+                Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir) / LIBRARY_NAME};
             std::error_code ec;
-            if (!std::filesystem::is_regular_file(file, ec)) {
+#ifdef _WIN32
+            candidates.push_back(Common::FS::GetExeDirectory() / LIBRARY_NAME);
+#elif defined(__linux__)
+            if (const auto exe = std::filesystem::read_symlink("/proc/self/exe", ec); !ec) {
+                candidates.push_back(exe.parent_path() / LIBRARY_NAME);
+                candidates.push_back(exe.parent_path().parent_path() / "lib" / LIBRARY_NAME);
+            }
+#endif
+            for (const auto& file : candidates) {
+                if (std::filesystem::is_regular_file(file, ec)) {
+                    path = Common::FS::PathToUTF8String(file);
+                    break;
+                }
+            }
+            if (path.empty()) {
                 return nullptr;
             }
-            path = Common::FS::PathToUTF8String(file);
         }
         auto lib = std::make_shared<Common::DynamicLibrary>(path.c_str());
         if (!lib->IsOpen()) {

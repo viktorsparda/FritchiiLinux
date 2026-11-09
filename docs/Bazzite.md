@@ -72,6 +72,47 @@ If the window is black or misplaced under Gaming Mode's compositor, enable
 **Force X11 as Graphics Backend** in **Emulation > Configure... > General**, or put
 `QT_QPA_PLATFORM=xcb %command%` in the shortcut's launch options.
 
+## AMD FSR 4 (Ocarina of Time)
+
+Ocarina of Time renders with its own DLSS pass, which Lichii can replace with AMD's upscalers
+(upstream [#695](https://github.com/zortos293/Lichii/pull/695) and
+[#915](https://github.com/zortos293/Lichii/pull/915)). Turn on
+**Emulation > Configure... > Graphics > Use AMD FSR 4 / FSR 3.1 upscaling in Ocarina of Time**
+and start the game.
+
+FSR 4 comes from an FFX API upscaler library named `amd_fidelityfx_upscaler_vk.so`. AMD ships
+FSR 4 for Windows only, so on Linux this is [fsr4-vk](https://github.com/Astyyyyy/fsr4-vk), an
+independent Vulkan port of FSR 4.1.1 built from AMD's SDK 2.3.0 model (not affiliated with AMD).
+Lichii loads the first of:
+
+1. the file named by `EDEN_NX2_FSR4_LIB`;
+2. `~/.local/share/eden/amd_fidelityfx_upscaler_vk.so`;
+3. the copy shipped with the emulator (`usr/lib` inside an AppImage built with `--fsr4-lib`).
+
+Without the library, or when FSR 4 can't start on the GPU, Lichii uses AMD FSR 3.1, which runs on
+any Vulkan GPU. The log says which one runs: `FSR 4: upscaler library ...` and
+`FSR 4: context ...` for FSR 4, `... using FSR 3.1` otherwise.
+
+fsr4-vk runs the FP8 model on GPUs with `VK_EXT_shader_float8` and FP8 cooperative matrices
+(RDNA 4 on a current Mesa) and the INT8 model elsewhere; `FSR4_VK_MODEL=int8` or `fp8` overrides
+the choice. Lichii enables `VK_EXT_shader_float8` on the device when the driver offers it: the FP8
+model draws a black picture without it (CheezerWheezer/Lichii ab795780).
+
+To build the library yourself (in the same distrobox as the emulator, plus `llvm`):
+
+```bash
+git clone --recurse-submodules https://github.com/Astyyyyy/fsr4-vk.git
+cd fsr4-vk
+python3 tools/setup.py --dll /path/to/amd_fidelityfx_upscaler_dx12.dll
+bash tools/build/linux.sh
+```
+
+The DLL is `Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_dx12.dll` from AMD's
+[FidelityFX SDK v2.3.0](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/tag/v2.3.0)
+(SHA-256 `d0dcccc74a43c44ba435b7a369b456e0970d8a4464e4bd683119b374f2c9fb46`; setup checks it).
+Then either copy `build/linux/amd_fidelityfx_upscaler_vk.so` to `~/.local/share/eden/`, or bundle
+it: `tools/linux/bazzite-build.sh --appimage --fsr4-lib /path/to/fsr4-vk/build/linux/amd_fidelityfx_upscaler_vk.so`.
+
 ## Updates
 
 Release builds check this repository for new releases and can replace the installed AppImage in

@@ -23,6 +23,8 @@ Usage: $0 [options]
   --no-container       Build on this system even if it is an immutable host
   --box <name>         Distrobox name (default: fritchii-build)
   --fedora <version>   Fedora release for the distrobox (default: the host's)
+  --fsr4-lib <file>    Bundle this amd_fidelityfx_upscaler_vk.so (FSR 4, e.g. from fsr4-vk)
+                       in the AppImage; its LICENSE* files and LICENSES/ go along
   -h, --help           Show this help
 EOF
 }
@@ -36,6 +38,7 @@ install_deps=1
 use_container=auto
 box=fritchii-build
 fedora=""
+fsr4_lib=""
 args=("$@")
 
 while [ $# -gt 0 ]; do
@@ -48,6 +51,7 @@ while [ $# -gt 0 ]; do
         --no-container) use_container=no ;;
         --box) box=$2; shift ;;
         --fedora) fedora=$2; shift ;;
+        --fsr4-lib) fsr4_lib=$(realpath "$2"); shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -154,6 +158,22 @@ if [ "$appimage" = 1 ]; then
     mkdir -p "$tools/bin"
     cp "$bin/lichii" "$bin/eden-cli" "$tools/bin/"
     strip "$tools/bin/lichii" "$tools/bin/eden-cli"
+    if [ -n "$fsr4_lib" ]; then
+        # The emulator looks for it in ../lib beside its executable.
+        mkdir -p "$appdir/usr/lib" "$appdir/usr/share/doc/fsr4-vk"
+        cp "$fsr4_lib" "$appdir/usr/lib/amd_fidelityfx_upscaler_vk.so"
+        # fsr4-vk's notices sit at its repository root, a few levels above the built library.
+        dir=$(dirname "$fsr4_lib")
+        for _ in 1 2 3 4; do
+            if [ -f "$dir/THIRD_PARTY_NOTICES.md" ]; then
+                cp -r "$dir"/LICENSE* "$dir/THIRD_PARTY_NOTICES.md" "$appdir/usr/share/doc/fsr4-vk/"
+                break
+            fi
+            dir=$(dirname "$dir")
+        done
+        [ -f "$appdir/usr/share/doc/fsr4-vk/THIRD_PARTY_NOTICES.md" ] ||
+            echo "warning: fsr4-vk's license notices weren't found next to $fsr4_lib" >&2
+    fi
     (
         cd "$build_dir"
         export APPIMAGE_EXTRACT_AND_RUN=1
