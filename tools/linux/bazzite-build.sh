@@ -159,6 +159,11 @@ if [ "$appimage" = 1 ]; then
     mkdir -p "$tools/bin"
     cp "$bin/lichii" "$bin/eden-cli" "$tools/bin/"
     strip "$tools/bin/lichii" "$tools/bin/eden-cli"
+    # Fritchii's shader preparation recipes (as its Windows zip ships them beside lichii.exe).
+    if compgen -G "$src_dir/dist/recipes/*.nx2recipe" > /dev/null; then
+        mkdir -p "$appdir/usr/share/fritchii/recipes"
+        cp "$src_dir"/dist/recipes/*.nx2recipe "$appdir/usr/share/fritchii/recipes/"
+    fi
     (
         cd "$build_dir"
         export APPIMAGE_EXTRACT_AND_RUN=1

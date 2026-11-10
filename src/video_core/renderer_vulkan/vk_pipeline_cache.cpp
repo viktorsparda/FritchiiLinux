@@ -585,6 +585,15 @@ bool DriverCachesPipelines(const Device& device) {
     case VK_DRIVER_ID_NVIDIA_PROPRIETARY:
     case VK_DRIVER_ID_AMD_PROPRIETARY:
         return true;
+    case VK_DRIVER_ID_MESA_RADV:
+    case VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA:
+    case VK_DRIVER_ID_MESA_NVK: {
+        // Mesa keeps compiled shaders in its disk cache (~/.cache/mesa_shader_cache) unless the
+        // player turned it off.
+        const char* const disable = std::getenv("MESA_SHADER_CACHE_DISABLE");
+        return disable == nullptr || (std::string_view{disable} != "true" &&
+                                      std::string_view{disable} != "1");
+    }
     default:
         return false;
     }

@@ -59,6 +59,20 @@ install on the same account:
 A folder named `user` in the folder Fritchii is started from takes their place (portable mode), as
 on Windows next to the executable.
 
+## Preparing shaders
+
+As on Windows, the first start of Ocarina of Time shows a "Preparing shaders" screen (about 15
+minutes on an 8-core CPU, once per driver and GPU); after that new areas don't stall on shader
+builds. It comes from Fritchii's recipe for the game, `OoT v131072 (cache v54).nx2recipe`, which
+the AppImage carries in `usr/share/fritchii/recipes` (the Windows zip has it in `recipes` beside
+`lichii.exe`). Fritchii also reads recipes from `~/.local/share/eden/recipes` and from a `recipes`
+folder beside the `lichii` binary.
+
+The prepared shaders live in the driver's own cache. With Mesa's drivers (RADV on AMD, ANV, NVK)
+that is `~/.cache/mesa_shader_cache`, which Fritchii enlarges to 10 GiB for its own process
+(`MESA_SHADER_CACHE_MAX_SIZE`, unless you set it). With `MESA_SHADER_CACHE_DISABLE=true` there is
+no cache to fill, so Fritchii skips the preparation.
+
 ## Gaming Mode (Steam Deck, handhelds, HTPC)
 
 1. In Desktop Mode, run the installer with `--steam`, or in Steam use **Games > Add a Non-Steam

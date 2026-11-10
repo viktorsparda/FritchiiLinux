@@ -25,14 +25,30 @@
 namespace VideoCommon::Nx2Precompile {
 namespace {
 
-// Where players put recipes: beside the executable on Windows. An AppImage's folder is read-only,
-// so elsewhere the user folder holds them.
-std::filesystem::path RecipeFolder() {
+// Where recipes are looked for after the title's own folder: beside the executable on Windows, as
+// Fritchii's zip ships them. An AppImage's folder is read-only, so on Linux the player's go in the
+// user folder, and a package's own sit beside the executable or in ../share/fritchii/recipes.
+std::vector<std::filesystem::path> RecipeFolders() {
 #ifdef _WIN32
-    return Common::FS::GetExeDirectory() / "recipes";
+    return {Common::FS::GetExeDirectory() / "recipes"};
 #else
-    return Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir) / "recipes";
+    std::vector<std::filesystem::path> folders{
+        Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir) / "recipes"};
+    std::error_code error;
+    if (const auto exe = std::filesystem::read_symlink("/proc/self/exe", error); !error) {
+        folders.push_back(exe.parent_path() / "recipes");
+        folders.push_back(exe.parent_path().parent_path() / "share" / "fritchii" / "recipes");
+    }
+    return folders;
 #endif
+}
+
+std::string RecipeFolderList() {
+    std::string list;
+    for (const auto& folder : RecipeFolders()) {
+        list += (list.empty() ? "" : ", ") + Common::FS::PathToUTF8String(folder);
+    }
+    return list;
 }
 
 std::mutex g_game_files_mutex;
@@ -161,7 +177,9 @@ std::optional<Recipe> FindRecipe(u64 title_id, const std::filesystem::path& titl
         forced != nullptr && *forced != '\0') {
         candidates.emplace_back(forced);
     }
-    for (const auto& folder : {title_dir, RecipeFolder()}) {
+    std::vector<std::filesystem::path> folders{title_dir};
+    std::ranges::copy(RecipeFolders(), std::back_inserter(folders));
+    for (const auto& folder : folders) {
         std::error_code error;
         std::vector<std::filesystem::path> found;
         for (std::filesystem::directory_iterator it{folder, error}, end; !error && it != end;
@@ -211,7 +229,7 @@ std::filesystem::path EnsurePrecompiledFile(u64 title_id, const std::filesystem:
                      "Precompiled pipelines: no {} and no recipe for {:016X} (looked in {} and {})",
                      precompiled.filename().string(), title_id,
                      Common::FS::PathToUTF8String(title_dir),
-                     Common::FS::PathToUTF8String(RecipeFolder()));
+                     RecipeFolderList());
             return {};
         }
         return precompiled;

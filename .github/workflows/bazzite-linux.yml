@@ -159,7 +159,11 @@ jobs:
           test -x $bin/lichii
           test -x $bin/eden-cli
           strip $bin/lichii $bin/eden-cli
-          tar -czf "fritchii-${{ matrix.platform }}.tar.gz" -C $bin lichii eden-cli
+          # Fritchii's shader preparation recipes go beside the binary, as in its Windows zip.
+          mkdir -p $bin/recipes AppDir/usr/share/fritchii/recipes
+          cp dist/recipes/*.nx2recipe $bin/recipes/
+          cp dist/recipes/*.nx2recipe AppDir/usr/share/fritchii/recipes/
+          tar -czf "fritchii-${{ matrix.platform }}.tar.gz" -C $bin lichii eden-cli recipes
           tools="$RUNNER_TEMP/linuxdeploy"
           mkdir -p "$tools"
           for tool in linuxdeploy linuxdeploy-plugin-qt; do

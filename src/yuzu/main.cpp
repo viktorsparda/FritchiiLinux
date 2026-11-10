@@ -230,6 +230,12 @@ int main(int argc, char* argv[]) {
         if (!qEnvironmentVariableIsSet("__GL_SHADER_DISK_CACHE_SIZE")) {
             qputenv("__GL_SHADER_DISK_CACHE_SIZE", "10737418240"); // 10 GiB
         }
+#ifdef __linux__
+        // Mesa (RADV, ANV, NVK) keeps them in its disk cache, which holds 1 GiB by default.
+        if (!qEnvironmentVariableIsSet("MESA_SHADER_CACHE_MAX_SIZE")) {
+            qputenv("MESA_SHADER_CACHE_MAX_SIZE", "10G");
+        }
+#endif
     }
 #if YUZU_ROOM
     bool launch_room = false;
