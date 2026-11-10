@@ -37,6 +37,11 @@
 #include <objc/message.h>
 #endif
 
+#ifdef __linux__
+#include <cstdlib>
+#include <sys/prctl.h>
+#endif
+
 #ifdef _WIN32
 #include <QApplication>
 #include <QSettings>
@@ -273,6 +278,17 @@ void Init(QWidget* root) {
     LOG_INFO(Frontend, "Host RAM: {:.2f} GiB",
              Common::GetMemInfo().TotalPhysicalMemory / f64{1_GiB});
     LOG_INFO(Frontend, "Host Swap: {:.2f} GiB", Common::GetMemInfo().TotalSwapMemory / f64{1_GiB});
+#ifdef __linux__
+    // Linux's counterpart of the Windows timer resolution below: a thread's sleeps may run up to
+    // its timer slack (50 us by default) late, and the GPU, Vulkan and OoT present threads sleep
+    // 50-250 us at a time. Threads started from here on inherit 1 us. EDEN_NX2_TIMER_SLACK=0
+    // keeps the default.
+    if (const char* slack = std::getenv("EDEN_NX2_TIMER_SLACK"); !slack || slack[0] != '0') {
+        if (prctl(PR_SET_TIMERSLACK, 1UL, 0UL, 0UL, 0UL) == 0) {
+            LOG_INFO(Frontend, "Host timer slack: 1 us");
+        }
+    }
+#endif
 #ifdef _WIN32
     LOG_INFO(Frontend, "Host Timer Resolution: {:.4f} ms",
              std::chrono::duration_cast<std::chrono::duration<f64, std::milli>>(
