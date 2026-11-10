@@ -87,3 +87,7 @@ Send each coin on its matching network. Coins sent on the wrong network can't be
 Lichii inherits the work of the Eglantine, Eden, yuzu and Sudachi projects and their contributors, including Eglantine's original developer Camille LaVey. Original copyright notices and third-party licenses are retained.
 
 See [LICENSE.txt](LICENSE.txt) and the source files for applicable license terms.
+
+## Linux (Bazzite)
+
+This branch builds Fritchii for Linux as an AppImage. See [docs/Bazzite.md](docs/Bazzite.md) to install it on Bazzite or other distributions, or to build it from source.
