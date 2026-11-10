@@ -2,7 +2,7 @@
 
 [Fritchii](https://github.com/Frizti/Fritchii) is Frizti's fork of Lichii, released for Windows.
 This branch packages it for Linux, mainly [Bazzite](https://bazzite.gg) and other Fedora Atomic
-systems. The emulator code is Fritchii's own (the `fritchii-v5.5` tag); what this branch adds:
+systems. The emulator code is Fritchii's own (currently the `fritchii-v5.6` tag); what this branch adds:
 
 - `tools/linux/bazzite-build.sh` builds Fritchii inside a Fedora distrobox that matches your Bazzite
   release, and can package it as `fritchii-linux-x86_64.AppImage`.
@@ -72,6 +72,12 @@ The prepared shaders live in the driver's own cache. With Mesa's drivers (RADV o
 that is `~/.cache/mesa_shader_cache`, which Fritchii enlarges to 10 GiB for its own process
 (`MESA_SHADER_CACHE_MAX_SIZE`, unless you set it). With `MESA_SHADER_CACHE_DISABLE=true` there is
 no cache to fill, so Fritchii skips the preparation.
+
+## Anti-aliasing in Ocarina of Time
+
+**Ocarina of Time anti-aliasing** offers the game's own network, AMD FSR 3.1 and AMD FSR 4. FSR 3.1
+works on Linux. Fritchii's FSR 4 loads AMD's signed Windows runtime, which doesn't exist for Linux,
+so on Linux the FSR 4 choice falls back to FSR 3.1 (the log says `using FSR 3.1`).
 
 ## Gaming Mode (Steam Deck, handhelds, HTPC)
 
