@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <optional>
+#include <string_view>
 
 #include "common/logging.h"
 #include "common/settings.h"
@@ -680,6 +681,25 @@ struct OcarinaEffects {
     std::optional<u64> previous_marked_frame;
 };
 
+// How FSR's reactive mask treats the effects drawn after the fog (EDEN_NX2_OOT_FSR_REACTIVE):
+// full drops the history under any visible effect, which left Link aliased in light shafts;
+// scaled keeps most of it under faint ones; off gives FSR no mask.
+enum class FsrReactive { Full, Scaled, Off };
+
+FsrReactive FsrReactiveMode() {
+    static const FsrReactive mode = [] {
+        const char* const env = std::getenv("EDEN_NX2_OOT_FSR_REACTIVE");
+        const std::string_view value = env ? env : "scaled";
+        const FsrReactive result = value == "full" ? FsrReactive::Full
+                                   : value == "off" ? FsrReactive::Off
+                                                    : FsrReactive::Scaled;
+        LOG_INFO(Render_Vulkan, "Ocarina FSR reactive mask: {}",
+                 result == FsrReactive::Full ? "full" : result == FsrReactive::Off ? "off" : "scaled");
+        return result;
+    }();
+    return mode;
+}
+
 } // namespace
 
 struct OcarinaUpscaler::Impl {
@@ -974,8 +994,9 @@ bool OcarinaUpscaler::Record(VkImageView color, VkImageView depth, VkImageView t
         state.queue.AddSampledImage(*effects.mark_views[previous_mark % 2], sampler);
         state.queue.AddSampledImage(*resources.motion_view, sampler);
         state.queue.AddImage(*effects.bias_view);
+        const u32 curve = FsrReactiveMode() == FsrReactive::Scaled ? 1u : 0u;
         state.effects_bias_pass->Record(state.scheduler, state.queue.UpdateData(), *effects.bias,
-                                        extent, has_previous ? 1 : 0);
+                                        extent, (has_previous ? 1u : 0u) | (curve << 1));
         bias_view = *effects.bias_view;
         bias_image = *effects.bias;
     }
@@ -1004,6 +1025,7 @@ bool OcarinaUpscaler::Record(VkImageView color, VkImageView depth, VkImageView t
         return false;
     }
 #endif
+    const bool fsr_mask = FsrReactiveMode() != FsrReactive::Off;
     bool used_fsr4 = false;
     if (state.UsesFsr4()) {
         const auto now = std::chrono::steady_clock::now();
@@ -1016,7 +1038,7 @@ bool OcarinaUpscaler::Record(VkImageView color, VkImageView depth, VkImageView t
             .depth = {depth_image, VK_FORMAT_D32_SFLOAT, DEPTH_RANGE, VK_IMAGE_ASPECT_DEPTH_BIT},
             .motion_vectors = {*resources.motion, MOTION_FORMAT, COLOR_RANGE,
                                VK_IMAGE_ASPECT_COLOR_BIT},
-            .reactive = bias_image ? std::optional{Fsr4Upscaler::Image{
+            .reactive = bias_image && fsr_mask ? std::optional{Fsr4Upscaler::Image{
                 bias_image, BIAS_FORMAT, COLOR_RANGE, VK_IMAGE_ASPECT_COLOR_BIT}} : std::nullopt,
             .render_size = extent,
             .upscale_size = output_extent,
@@ -1060,8 +1082,8 @@ bool OcarinaUpscaler::Record(VkImageView color, VkImageView depth, VkImageView t
             .reset = fsr_reset,
             .sharpen = sharpness > 0.0f,
             .sharpness = sharpness,
-            .reactive_mask = bias_view,
-            .transparency_mask = bias_view,
+            .reactive_mask = fsr_mask ? bias_view : VkImageView{},
+            .transparency_mask = fsr_mask ? bias_view : VkImageView{},
             .vertical_fov = 2.0f * std::atan(1.0f / projection_y),
         });
         state.last_evaluation = now;

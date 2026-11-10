@@ -6,7 +6,8 @@ layout(binding = 0) uniform sampler2D current_effects;
 layout(binding = 1) uniform sampler2D previous_effects;
 layout(binding = 2) uniform sampler2D motion;
 layout(binding = 3, r16f) uniform writeonly image2D bias;
-layout(push_constant) uniform Controls { uint has_previous; } controls;
+// Bit 0: the previous frame's mark is valid. Bits 1-2: the mask curve (0 full, 1 scaled).
+layout(push_constant) uniform Controls { uint flags; } controls;
 
 float Nearby(sampler2D effects, ivec2 center) {
     ivec2 last = textureSize(effects, 0) - 1;
@@ -27,9 +28,13 @@ void main() {
     // Glows and particles have no motion of their own: use them as drawn this frame, and drop
     // the history DLSS would read where they were drawn last frame.
     float value = Nearby(current_effects, pixel);
-    if (controls.has_previous != 0) {
+    if ((controls.flags & 1u) != 0u) {
         vec2 history = vec2(pixel) + 0.5 + texelFetch(motion, pixel, 0).rg;
         value = max(value, Nearby(previous_effects, ivec2(floor(history))));
     }
+    // Full: any visible effect drops the history. Scaled: faint, wide effects (light shafts over
+    // Link) keep most of it, and even bright ones keep a quarter, so FSR still anti-aliases there.
+    value = ((controls.flags >> 1) & 3u) == 1u ? 0.75 * smoothstep(0.04, 0.40, value)
+                                                : smoothstep(0.02, 0.08, value);
     imageStore(bias, pixel, vec4(value));
 }

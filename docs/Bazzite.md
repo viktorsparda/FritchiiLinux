@@ -98,6 +98,14 @@ fsr4-vk runs the FP8 model on GPUs with `VK_EXT_shader_float8` and FP8 cooperati
 the choice. Lichii enables `VK_EXT_shader_float8` on the device when the driver offers it: the FP8
 model draws a black picture without it (CheezerWheezer/Lichii ab795780).
 
+Effects the game draws after its fog (Navi's glow, fireflies, dust, light shafts) go to FSR as a
+reactive mask, which tells it to drop its history there. Dropping all of it left Link aliased and
+noisy inside window light shafts, so the mask is now scaled to the effect's strength. While this is
+being tested, `EDEN_NX2_OOT_FSR_REACTIVE` picks the mask: `scaled` (default), `full` (the earlier
+behaviour) or `off` (no mask; glows and particles may smear instead). For example:
+`EDEN_NX2_OOT_FSR_REACTIVE=off ~/.local/bin/lichii`, or `EDEN_NX2_OOT_FSR_REACTIVE=off %command%`
+in a Steam shortcut's launch options. The log prints `Ocarina FSR reactive mask: <mode>`.
+
 To build the library yourself (in the same distrobox as the emulator, plus `llvm`):
 
 ```bash
