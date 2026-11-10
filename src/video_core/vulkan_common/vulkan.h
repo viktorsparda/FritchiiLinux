@@ -37,6 +37,11 @@
 #undef False
 #undef None
 #undef True
+// X11 (Linux): Xlib's Status, Success and BadValue macros clash with names in Lichii's code
+// (CheezerWheezer/Lichii 07ad3cf1 for the last two).
+#undef Status
+#undef Success
+#undef BadValue
 
 // "Catch-all" handle for both Android and.. the rest of platforms
 struct VkSurfaceKHR_T;

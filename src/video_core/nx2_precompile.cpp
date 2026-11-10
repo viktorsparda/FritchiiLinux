@@ -25,6 +25,16 @@
 namespace VideoCommon::Nx2Precompile {
 namespace {
 
+// Where players put recipes: beside the executable on Windows. An AppImage's folder is read-only,
+// so elsewhere the user folder holds them.
+std::filesystem::path RecipeFolder() {
+#ifdef _WIN32
+    return Common::FS::GetExeDirectory() / "recipes";
+#else
+    return Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir) / "recipes";
+#endif
+}
+
 std::mutex g_game_files_mutex;
 u64 g_game_files_title{};
 GameFiles g_game_files;
@@ -151,7 +161,7 @@ std::optional<Recipe> FindRecipe(u64 title_id, const std::filesystem::path& titl
         forced != nullptr && *forced != '\0') {
         candidates.emplace_back(forced);
     }
-    for (const auto& folder : {title_dir, Common::FS::GetExeDirectory() / "recipes"}) {
+    for (const auto& folder : {title_dir, RecipeFolder()}) {
         std::error_code error;
         std::vector<std::filesystem::path> found;
         for (std::filesystem::directory_iterator it{folder, error}, end; !error && it != end;
@@ -201,7 +211,7 @@ std::filesystem::path EnsurePrecompiledFile(u64 title_id, const std::filesystem:
                      "Precompiled pipelines: no {} and no recipe for {:016X} (looked in {} and {})",
                      precompiled.filename().string(), title_id,
                      Common::FS::PathToUTF8String(title_dir),
-                     Common::FS::PathToUTF8String(Common::FS::GetExeDirectory() / "recipes"));
+                     Common::FS::PathToUTF8String(RecipeFolder()));
             return {};
         }
         return precompiled;
