@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <boost/container/static_vector.hpp>
@@ -122,6 +123,27 @@ VkImageMemoryBarrier Barrier(const Fsr4Upscaler::Image& image, VkAccessFlags src
     return Barrier(image.image, range, src_access, dst_access, old_layout, new_layout);
 }
 
+// How the colour Ocarina hands its upscaler is described to FSR 4 (EDEN_NX2_OOT_FSR_COLOR). The game
+// gives tonemapped, square-root-encoded colour: nonlinear says it's perceptual already, srgb says it
+// follows the sRGB curve, linear (the earlier behaviour) says it's linear light.
+enum class ColorEncoding { Nonlinear, Srgb, Linear };
+
+ColorEncoding InputColorEncoding() {
+    static const ColorEncoding encoding = [] {
+        const char* const env = std::getenv("EDEN_NX2_OOT_FSR_COLOR");
+        const std::string_view value = env ? env : "nonlinear";
+        const ColorEncoding result = value == "srgb"     ? ColorEncoding::Srgb
+                                     : value == "linear" ? ColorEncoding::Linear
+                                                         : ColorEncoding::Nonlinear;
+        LOG_INFO(Render_Vulkan, "FSR 4: input colour treated as {}",
+                 result == ColorEncoding::Srgb     ? "sRGB"
+                 : result == ColorEncoding::Linear ? "linear"
+                                                   : "nonlinear (perceptual)");
+        return result;
+    }();
+    return encoding;
+}
+
 void Message(uint32_t type, const wchar_t* message) {
     std::string text;
     for (const wchar_t* c = message; c && *c; ++c) {
@@ -221,7 +243,9 @@ bool Fsr4Upscaler::CreateContext(VkExtent2D render_size, VkExtent2D upscale_size
     create.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
     create.header.pNext = &backend.header;
     // Tonemapped LDR colour, standard (not reversed) finite depth, exposure given (unit).
-    create.flags = 0;
+    create.flags = InputColorEncoding() == ColorEncoding::Nonlinear
+                       ? FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE
+                       : 0u;
     create.maxRenderSize = {render_size.width, render_size.height};
     create.maxUpscaleSize = {upscale_size.width, upscale_size.height};
     create.fpMessage = Message;
@@ -365,7 +389,8 @@ bool Fsr4Upscaler::Upscale(const Inputs& in) {
     dispatch.cameraFar = in.camera_far;
     dispatch.cameraFovAngleVertical = in.vertical_fov;
     dispatch.viewSpaceToMetersFactor = 1.0f;
-    dispatch.flags = 0;
+    dispatch.flags =
+        InputColorEncoding() == ColorEncoding::Srgb ? FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB : 0u;
 
     scheduler.RequestOutsideRenderPassOperationContext();
     scheduler.Record([this, in, dispatch,
