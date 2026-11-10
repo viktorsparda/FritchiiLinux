@@ -2117,6 +2117,9 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
     }
 
     PrepareShaderPrecache(title_id, std::filesystem::path{filename.toStdU16String()});
+    if (title_id != 0) {
+        AutoPrepareShadersFromRecipe(title_id, filename.toUtf8().constData());
+    }
     Settings::LogSettings();
 
     if (UISettings::values.select_user_on_boot && !user_flag_cmd_line) {
@@ -3005,26 +3008,36 @@ void MainWindow::OnGameListPrepareShadersFromRecipe(u64 program_id, const std::s
             return;
         }
     }
+    PrepareShadersFromRecipe(program_id, game_path, recipe, false);
+}
+
+bool MainWindow::PrepareShadersFromRecipe(u64 program_id, const std::string& game_path,
+                                          const std::vector<u8>& recipe, bool automatic) {
+    const QString title = tr("Prepare Precompiled Shaders");
+    // Found by AutoPrepareShadersFromRecipe at boot: problems go to the log, not a dialog.
+    const auto warn = [&](const QString& text) {
+        if (automatic) {
+            LOG_WARNING(Frontend, "Precompile recipe: {}", text.toStdString());
+        } else {
+            QMessageBox::warning(this, title, text);
+        }
+    };
     const auto header = VideoCommon::Nx2Recipe::ReadHeader(recipe);
     if (!header) {
-        QMessageBox::warning(this, title, tr("This file is not a precompile recipe."));
-        return;
+        warn(tr("This file is not a precompile recipe."));
+        return false;
     }
     if (header->title_id != program_id) {
-        QMessageBox::warning(this, title,
-                             tr("This recipe is for another game (%1).")
-                                 .arg(QString::fromStdString(
-                                     fmt::format("{:016X}", header->title_id))));
-        return;
+        warn(tr("This recipe is for another game (%1).")
+                 .arg(QString::fromStdString(fmt::format("{:016X}", header->title_id))));
+        return false;
     }
     if (header->cache_version != VideoCommon::VulkanPipelineCacheVersion) {
-        QMessageBox::warning(this, title,
-                             tr("This recipe was made for shader cache version %1, and this build "
-                                "of Lichii uses version %2. A recipe made for this version is "
-                                "needed.")
-                                 .arg(header->cache_version)
-                                 .arg(VideoCommon::VulkanPipelineCacheVersion));
-        return;
+        warn(tr("This recipe was made for shader cache version %1, and this build of Lichii "
+                "uses version %2. A recipe made for this version is needed.")
+                 .arg(header->cache_version)
+                 .arg(VideoCommon::VulkanPipelineCacheVersion));
+        return false;
     }
 
     // The game's RomFS as it loads it: a NUP's update laid over its base (loader/nup.cpp), or what
@@ -3062,8 +3075,8 @@ void MainWindow::OnGameListPrepareShadersFromRecipe(u64 program_id, const std::s
         }
     }
     if (roots.empty()) {
-        QMessageBox::warning(this, title, tr("The game's files could not be read."));
-        return;
+        warn(tr("The game's files could not be read."));
+        return false;
     }
 
     QProgressDialog progress(tr("Finding the game's shaders..."), tr("Cancel"), 0, 1000, this);
@@ -3116,13 +3129,12 @@ void MainWindow::OnGameListPrepareShadersFromRecipe(u64 program_id, const std::s
     const Outcome outcome = job.get();
     progress.close();
     if (stop.stop_requested()) {
-        return;
+        return false;
     }
     if (!outcome.error.empty() || outcome.file.empty()) {
-        QMessageBox::warning(this, title,
-                             tr("The precompiled pipelines could not be built: %1")
-                                 .arg(QString::fromStdString(outcome.error)));
-        return;
+        warn(tr("The precompiled pipelines could not be built: %1")
+                 .arg(QString::fromStdString(outcome.error)));
+        return false;
     }
 
     const auto dir = Common::FS::GetEdenPath(Common::FS::EdenPath::ShaderDir) /
@@ -3145,10 +3157,9 @@ void MainWindow::OnGameListPrepareShadersFromRecipe(u64 program_id, const std::s
     }
     if (!written) {
         std::filesystem::remove(temporary, error);
-        QMessageBox::warning(this, title,
-                             tr("The precompiled pipelines could not be saved to %1.")
-                                 .arg(QString::fromStdString(Common::FS::PathToUTF8String(path))));
-        return;
+        warn(tr("The precompiled pipelines could not be saved to %1.")
+                 .arg(QString::fromStdString(Common::FS::PathToUTF8String(path))));
+        return false;
     }
 
     const auto& report = outcome.report;
@@ -3172,7 +3183,65 @@ void MainWindow::OnGameListPrepareShadersFromRecipe(u64 program_id, const std::s
     text += QStringLiteral("\n\n") +
             tr("NVIDIA: set Shader Cache Size to Unlimited in the NVIDIA Control Panel, or the "
                "driver keeps only part of them.");
-    QMessageBox::information(this, title, text);
+    if (automatic) {
+        LOG_INFO(Frontend, "Precompile recipe: {}", text.toStdString());
+    } else {
+        QMessageBox::information(this, title, text);
+    }
+    return true;
+}
+
+// A recipe for the game in a recipes folder, used once when the game has no precompiled pipeline
+// file yet: <data>/recipes, then recipes beside the executable, then ../share/lichii/recipes
+// (the AppImage's). EDEN_NX2_AUTO_RECIPE=0 leaves it to the game list's menu.
+void MainWindow::AutoPrepareShadersFromRecipe(u64 program_id, const std::string& game_path) {
+    if (const char* value = std::getenv("EDEN_NX2_AUTO_RECIPE"); value && value[0] == '0') {
+        return;
+    }
+    const auto shader_dir = Common::FS::GetEdenPath(Common::FS::EdenPath::ShaderDir) /
+                            fmt::format("{:016x}", program_id);
+    std::error_code error;
+    if (std::filesystem::exists(shader_dir / fmt::format("precompiled.fork-v{}.nx2prep",
+                                                         VideoCommon::VulkanPipelineCacheVersion),
+                                error)) {
+        return;
+    }
+    std::vector<std::filesystem::path> folders{
+        Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir) / "recipes",
+        Common::FS::GetExeDirectory() / "recipes"};
+#ifdef __linux__
+    if (const auto exe = std::filesystem::read_symlink("/proc/self/exe", error); !error) {
+        folders.push_back(exe.parent_path() / "recipes");
+        folders.push_back(exe.parent_path().parent_path() / "share" / "lichii" / "recipes");
+    }
+#endif
+    for (const auto& folder : folders) {
+        std::vector<std::filesystem::path> found;
+        for (std::filesystem::directory_iterator it{folder, error}, end; !error && it != end;
+             it.increment(error)) {
+            if (it->path().extension() == ".nx2recipe") {
+                found.push_back(it->path());
+            }
+        }
+        std::sort(found.begin(), found.end());
+        for (const auto& path : found) {
+            Common::FS::IOFile file{path, Common::FS::FileAccessMode::Read,
+                                    Common::FS::FileType::BinaryFile};
+            std::vector<u8> recipe(file.IsOpen() ? file.GetSize() : 0);
+            if (recipe.empty() || file.ReadSpan(std::span<u8>{recipe}) != recipe.size()) {
+                continue;
+            }
+            const auto header = VideoCommon::Nx2Recipe::ReadHeader(recipe);
+            if (!header || header->title_id != program_id ||
+                header->cache_version != VideoCommon::VulkanPipelineCacheVersion) {
+                continue;
+            }
+            LOG_INFO(Frontend, "Precompile recipe {} found for {:016X}: assembling it",
+                     Common::FS::PathToUTF8String(path), program_id);
+            PrepareShadersFromRecipe(program_id, game_path, recipe, true);
+            return;
+        }
+    }
 }
 
 // END

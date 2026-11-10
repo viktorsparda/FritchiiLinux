@@ -164,6 +164,14 @@ int main(int argc, char* argv[]) {
         qputenv("DISPLAY", ":0");
     }
 
+#ifdef __linux__
+    // Precompiled pipelines (PipelineCache::PreparePrecompiled) live in Mesa's disk cache on RADV,
+    // ANV and NVK. Its 1 GiB default holds a fraction of Ocarina of Time's; this process only.
+    if (!qEnvironmentVariableIsSet("MESA_SHADER_CACHE_MAX_SIZE")) {
+        qputenv("MESA_SHADER_CACHE_MAX_SIZE", "10G");
+    }
+#endif
+
     if (GraphicsBackend::GetForceX11() && qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
         qputenv("QT_QPA_PLATFORM", "xcb");
 
