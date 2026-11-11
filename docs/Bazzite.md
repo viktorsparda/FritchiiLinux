@@ -46,18 +46,18 @@ launcher sets `APPIMAGE_EXTRACT_AND_RUN=1`, and the AppImage unpacks itself on e
 
 ## Data
 
-Fritchii keeps Lichii's (and Eden's) folders, so it shares saves, keys and settings with a Lichii
-install on the same account:
+Since v5.8 Fritchii keeps its own folders. On its first start it offers to copy saves, keys and
+settings from an Eden or Lichii install on the same account (Help > Copy Data does it later):
 
 | What | Where |
 | --- | --- |
-| Saves, keys, NAND, mods | `~/.local/share/eden` |
-| Settings | `~/.config/eden` |
-| Shader caches | `~/.cache/eden` |
-| Logs | `~/.local/share/eden/log/eden_log.txt` |
+| Saves, keys, NAND, mods | `~/.local/share/fritchii` |
+| Settings | `~/.config/fritchii` |
+| Shader caches | `~/.cache/fritchii` |
+| Logs | `~/.local/share/fritchii/log/eden_log.txt` |
 
 A folder named `user` in the folder Fritchii is started from takes their place (portable mode), as
-on Windows next to the executable.
+on Windows next to the executable. Portable mode is left alone by the copy.
 
 ## Preparing shaders
 
@@ -65,7 +65,7 @@ As on Windows, the first start of Ocarina of Time shows a "Preparing shaders" sc
 minutes on an 8-core CPU, once per driver and GPU); after that new areas don't stall on shader
 builds. It comes from Fritchii's recipe for the game, `OoT v131072 (cache v54).nx2recipe`, which
 the AppImage carries in `usr/share/fritchii/recipes` (the Windows zip has it in `recipes` beside
-`lichii.exe`). Fritchii also reads recipes from `~/.local/share/eden/recipes` and from a `recipes`
+`lichii.exe`). Fritchii also reads recipes from `~/.local/share/fritchii/recipes` and from a `recipes`
 folder beside the `lichii` binary.
 
 The prepared shaders live in the driver's own cache. With Mesa's drivers (RADV on AMD, ANV, NVK)

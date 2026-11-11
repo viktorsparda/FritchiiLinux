@@ -59,7 +59,7 @@ if [ "$uninstall" = 1 ]; then
         "$app_dir/fritchii.AppImage"
     rmdir "$app_dir" 2>/dev/null || true
     command -v update-desktop-database > /dev/null && update-desktop-database "$apps_dir" || true
-    echo "Removed Fritchii. Saves and settings in ~/.local/share/eden and ~/.config/eden are kept."
+    echo "Removed Fritchii. Saves and settings in ~/.local/share/fritchii and ~/.config/fritchii are kept."
     exit 0
 fi
 
