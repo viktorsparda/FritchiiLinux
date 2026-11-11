@@ -2,7 +2,7 @@
 
 [Fritchii](https://github.com/Frizti/Fritchii) is Frizti's fork of Lichii, released for Windows.
 This branch packages it for Linux, mainly [Bazzite](https://bazzite.gg) and other Fedora Atomic
-systems. The emulator code is Fritchii's own (currently the `fritchii-v5.7` tag); what this branch adds:
+systems. The emulator code is Fritchii's own (currently the `fritchii-v5.8.4` tag); what this branch adds:
 
 - `tools/linux/bazzite-build.sh` builds Fritchii inside a Fedora distrobox that matches your Bazzite
   release, and can package it as `fritchii-linux-x86_64.AppImage`.
