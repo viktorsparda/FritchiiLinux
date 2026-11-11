@@ -2121,8 +2121,14 @@ void PipelineCache::PreparePrecompiled(const std::filesystem::path& base_dir,
     // the IR is freed before the driver compiles. The scheduler's memory budget bounds the stages
     // that run at once. Soon: the game waits for this step, while the background prebuild doesn't.
     const VideoCommon::ShaderJobBatch batch = shader_jobs->CreateBatch();
-    LOG_INFO(Render_Vulkan, "Preparing {} precompiled pipelines from {}, from record {}", total,
-             Common::FS::PathToUTF8String(path), start_index);
+    // The game waits at "Loading shaders" while this runs, so the driver compile happens in the
+    // CPU stage, on every CPU worker (hardware threads - 1), instead of queueing for the driver
+    // workers (half the threads). EDEN_NX2_PRECOMPILED_INLINE=0 queues them as the boot's builds.
+    const char* const inline_switch = std::getenv("EDEN_NX2_PRECOMPILED_INLINE");
+    const bool build_inline = !(inline_switch && inline_switch[0] == '0');
+    LOG_INFO(Render_Vulkan, "Preparing {} precompiled pipelines from {}, from record {}{}", total,
+             Common::FS::PathToUTF8String(path), start_index,
+             build_inline ? ", built on the CPU workers" : "");
     callback(VideoCore::LoadCallbackStage::Build, start_index, total);
     for (size_t index = start_index; index < total; ++index) {
         if (stop_loading.stop_requested()) {
@@ -2158,10 +2164,11 @@ void PipelineCache::PreparePrecompiled(const std::filesystem::path& base_dir,
         }
         shader_jobs->Submit(
             {.priority = VideoCommon::ShaderJobPriority::Soon,
-             .cpu_bytes = TranslationBytes(env_bytes),
-             .driver_bytes = DriverCompileBytes,
-             .cpu = [this, index, &record, &read_envs, &finish,
-                     &abandon](VideoCommon::ShaderJobContext& context) -> VideoCommon::ShaderDriverStage {
+             .cpu_bytes = TranslationBytes(env_bytes) + (build_inline ? DriverCompileBytes : 0),
+             .driver_bytes = build_inline ? 0 : DriverCompileBytes,
+             .cpu = [this, index, &record, &read_envs, &finish, &abandon,
+                     build_inline](VideoCommon::ShaderJobContext& context)
+                 -> VideoCommon::ShaderDriverStage {
                  if (context.StopRequested()) {
                      abandon();
                      return {};
@@ -2202,7 +2209,7 @@ void PipelineCache::PreparePrecompiled(const std::filesystem::path& base_dir,
                      finish(index, false);
                      return {};
                  }
-                 return [index, &finish, build = std::move(build)]() mutable {
+                 auto driver = [index, &finish, build = std::move(build)]() mutable {
                      bool ok = false;
                      try {
                          ok = build();
@@ -2211,6 +2218,11 @@ void PipelineCache::PreparePrecompiled(const std::filesystem::path& base_dir,
                      }
                      finish(index, ok);
                  };
+                 if (build_inline) {
+                     driver();
+                     return {};
+                 }
+                 return driver;
              }},
             &batch);
     }
