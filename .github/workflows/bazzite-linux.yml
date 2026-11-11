@@ -2,7 +2,8 @@ name: bazzite-linux
 
 # Lichii's Linux x86_64 AppImages with the bundled shader precompile recipes, for Bazzite and other
 # desktop Linux, published as releases of this repository. The updater only knows Lichii's own
-# releases, so it is off. Started by hand (Actions > bazzite-linux > Run workflow).
+# releases, so it is off. Runs on pushes to this branch that change the build, or by hand where
+# the workflow is on the default branch.
 
 on:
   workflow_dispatch:
@@ -11,6 +12,21 @@ on:
         description: Publish the AppImages as a GitHub release
         type: boolean
         default: true
+  push:
+    branches:
+      - claude/lichii-build150-linux
+    paths:
+      - "src/**"
+      - "!src/tests/**"
+      - "CMakeLists.txt"
+      - "CMakeModules/**"
+      - "externals/**"
+      - "dist/**"
+      - "tools/linux/**"
+      - ".patch/**"
+      - "cpmfile.json"
+      - "*.profdata"
+      - ".github/workflows/bazzite-linux.yml"
 
 permissions:
   contents: read
@@ -194,7 +210,7 @@ jobs:
   release:
     name: Publish release
     needs: build
-    if: inputs.publish_release
+    if: github.event_name == 'push' || inputs.publish_release
     runs-on: ubuntu-24.04
     permissions:
       contents: write
