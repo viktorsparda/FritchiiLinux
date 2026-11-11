@@ -3207,9 +3207,10 @@ void MainWindow::AutoPrepareShadersFromRecipe(u64 program_id, const std::string&
         return;
     }
     std::vector<std::filesystem::path> folders{
-        Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir) / "recipes",
-        Common::FS::GetExeDirectory() / "recipes"};
-#ifdef __linux__
+        Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir) / "recipes"};
+#ifdef _WIN32
+    folders.push_back(Common::FS::GetExeDirectory() / "recipes");
+#elif defined(__linux__)
     if (const auto exe = std::filesystem::read_symlink("/proc/self/exe", error); !error) {
         folders.push_back(exe.parent_path() / "recipes");
         folders.push_back(exe.parent_path().parent_path() / "share" / "lichii" / "recipes");
