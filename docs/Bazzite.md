@@ -52,6 +52,12 @@ A folder named `user` in the folder Lichii is started from takes their place (po
 - Recipes are looked for in `~/.local/share/lichii/recipes`, in a `recipes` folder beside the
   `lichii` binary, and in the AppImage. A recipe is used only for its own game and for this build's
   pipeline cache version (54).
+- The preparation also keeps each pipeline's translated SPIR-V and shader infos
+  (`precompiled_infos.fork-v54.bin`), and draws use them instead of translating the game's shader
+  on the GPU thread ([zortos293/Lichii#896](https://github.com/zortos293/Lichii/pull/896), as
+  Fritchii does). `EDEN_NX2_PRECOMPILED_FAST=0` translates them at runtime instead.
+- The preparation runs again for each new build of Lichii (its commit is part of the check), but
+  the driver's cache already holds most pipelines then, so it is shorter.
 - The game list's right-click menu still has **Prepare Precompiled Shaders from Recipe...** for any
   other recipe.
 - `EDEN_NX2_AUTO_RECIPE=0` turns the automatic assembly off. `EDEN_NX2_PRECOMPILED=0` skips the
